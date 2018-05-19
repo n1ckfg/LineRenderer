@@ -1,0 +1,24 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "LineRenderer",
+	"Description": "Create cylinder strips at runtime",
+	"Category": "n1ckfg",
+	"CreatedBy": "Nick Fox-Gieg",
+	"CreatedByURL": "https://github.com/n1ckfg",
+	"DocsURL": "https://github.com/n1ckfg/LineRenderer",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"EnabledByDefault": true,
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "LineRenderer",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}
