@@ -9,7 +9,7 @@ public class LineRenderer : ModuleRules
 
         PrivateIncludePaths.AddRange(new string[] { "LineRenderer/Private" });
 
-        PublicDependencyModuleNames.AddRange(new string[] { "Core" });
+        PublicDependencyModuleNames.AddRange(new string[] { "Core", "ProceduralMeshComponent" });
 
         PrivateDependencyModuleNames.AddRange(new string[] { "CoreUObject", "Engine", "Slate", "SlateCore" });
 

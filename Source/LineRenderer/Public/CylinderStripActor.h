@@ -5,7 +5,8 @@
 
 #include "LineRendererPrivatePCH.h"
 #include "GameFramework/Actor.h"
-#include "RuntimeMeshComponent.h"
+#include "ProceduralMeshComponent.h"
+#include "ProceduralMeshData.h"
 #include "CylinderStripActor.generated.h"
 
 UCLASS()
