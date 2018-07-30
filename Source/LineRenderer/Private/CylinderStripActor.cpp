@@ -6,10 +6,11 @@
 
 ACylinderStripActor::ACylinderStripActor()
 {
-	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
-	MeshComponent = CreateDefaultSubobject<URuntimeMeshComponent>(TEXT("ProceduralMesh"));
-	MeshComponent->bShouldSerializeMeshData = false;
-	MeshComponent->SetupAttachment(RootComponent);
+	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootScene"));
+	ProcMesh = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("ProceduralMesh"));
+	ProcMesh->AttachTo(RootComponent);
+	// Make sure the PMC doesnt save any mesh data with the map
+	ProcMesh->SetFlags(EObjectFlags::RF_Transient);
 }
 
 #if WITH_EDITOR  
@@ -17,12 +18,6 @@ void ACylinderStripActor::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
 	PreCacheCrossSection();
-	
-	// We need to re-construct the buffers since values can be changed in editor
-	Vertices.Empty();
-	Triangles.Empty();
-	SetupMeshBuffers();
-
 	GenerateMesh();
 }
 #endif // WITH_EDITOR
@@ -32,104 +27,44 @@ void ACylinderStripActor::BeginPlay()
 	Super::BeginPlay();
 	PreCacheCrossSection();
 	GenerateMesh();
-}
 
-void ACylinderStripActor::RefreshCylinder()
-{
-	PreCacheCrossSection();
-
-	// We need to re-construct the buffers since values can be changed in editor
-	Vertices.Empty();
-	Triangles.Empty();
-	SetupMeshBuffers();
-
-	GenerateMesh();
-}
-
-void ACylinderStripActor::SetupMeshBuffers()
-{
-	int32 TotalNumberOfVerticesPerSection = RadialSegmentCount * 4; // 4 verts per face 
-	int32 TotalNumberOfTrianglesPerSection = TotalNumberOfVerticesPerSection + 2 * RadialSegmentCount;
-	int32 NumberOfSections = LinePoints.Num() - 1;
-
-	Vertices.AddUninitialized(TotalNumberOfVerticesPerSection * NumberOfSections);
-	Triangles.AddUninitialized(TotalNumberOfTrianglesPerSection * NumberOfSections);
+	// Fix for PCM location/rotation/scale since the whole component is Transient
+	ProcMesh->SetWorldLocation(this->GetActorLocation());
+	ProcMesh->SetWorldRotation(this->GetActorRotation());
+	ProcMesh->SetWorldScale3D(this->GetActorScale3D());
 }
 
 void ACylinderStripActor::GenerateMesh()
 {
 	if (LinePoints.Num() < 2)
 	{
-		MeshComponent->ClearAllMeshSections();
 		return;
 	}
 
-	// The number of vertices or polygons wont change at runtime, so we'll just allocate the arrays once
-	if (!bHaveBuffersBeenInitialized)
-	{
-		SetupMeshBuffers();
-		bHaveBuffersBeenInitialized = true;
-	}
+	// Calculate and pre-allocate buffers
+	int32 TotalNumberOfVerticesPerSection = RadialSegmentCount * 4; // 4 verts per face 
+	int32 TotalNumberOfTrianglesPerSection = TotalNumberOfVerticesPerSection + 2 * RadialSegmentCount;
+	int32 NumberOfSections = LinePoints.Num() - 1;
+
+	FProceduralMeshData MeshData = FProceduralMeshData();
+	MeshData.Vertices.AddUninitialized(TotalNumberOfVerticesPerSection * NumberOfSections);
+	MeshData.Triangles.AddUninitialized(TotalNumberOfTrianglesPerSection * NumberOfSections);
+	MeshData.Normals.AddUninitialized(TotalNumberOfVerticesPerSection * NumberOfSections);
+	MeshData.UVs.AddUninitialized(TotalNumberOfVerticesPerSection * NumberOfSections);
+	MeshData.Tangents.AddUninitialized(TotalNumberOfVerticesPerSection * NumberOfSections);
 
 	// Now lets loop through all the defined points and create a cylinder between each two defined points
-	int32 NumberOfSections = LinePoints.Num() - 1;
-	int32 VertexIndex = 0;
-	int32 TriangleIndex = 0;
+	int32 CurrentIndexStart = 0;
 
 	for (int32 i = 0; i < NumberOfSections; i++)
 	{
-		GenerateCylinder(Vertices, Triangles, LinePoints[i], LinePoints[i + 1], Radius, RadialSegmentCount, VertexIndex, TriangleIndex, bSmoothNormals);
+		CurrentIndexStart = i * TotalNumberOfVerticesPerSection;
+		GenerateCylinder(MeshData, LinePoints[i], LinePoints[i + 1], Radius, RadialSegmentCount, CurrentIndexStart, bSmoothNormals);
 	}
 
-	MeshComponent->ClearAllMeshSections();
-	MeshComponent->CreateMeshSection(0, Vertices, Triangles, GetBounds(), false, EUpdateFrequency::Infrequent);
-	MeshComponent->SetMaterial(0, Material);
-}
-
-FBox ACylinderStripActor::GetBounds()
-{
-	FVector2D RangeX = FVector2D::ZeroVector;
-	FVector2D RangeY = FVector2D::ZeroVector;
-	FVector2D RangeZ = FVector2D::ZeroVector;
-
-	for (FVector& Position : LinePoints)
-	{
-		if (Position.X < RangeX.X)
-		{
-			RangeX.X = Position.X;
-		}
-		else if (Position.X >= RangeX.Y)
-		{
-			RangeX.Y = Position.X;
-		}
-
-		if (Position.Y < RangeY.X)
-		{
-			RangeY.X = Position.Y;
-		}
-		else if (Position.Y >= RangeY.Y)
-		{
-			RangeY.Y = Position.Y;
-		}
-
-		if (Position.Z < RangeZ.X)
-		{
-			RangeZ.X = Position.Z;
-		}
-		else if (Position.Z >= RangeZ.Y)
-		{
-			RangeZ.Y = Position.Z;
-		}
-	}
-
-	RangeX.X -= Radius;
-	RangeX.Y += Radius;
-	RangeY.X -= Radius;
-	RangeY.Y += Radius;
-	RangeZ.X -= Radius;
-	RangeZ.Y += Radius;
-	
-	return FBox(FVector(RangeX.X, RangeY.X, RangeZ.X), FVector(RangeX.Y, RangeY.Y, RangeZ.Y));
+	ProcMesh->ClearAllMeshSections();
+	ProcMesh->CreateMeshSection(0, MeshData.Vertices, MeshData.Triangles, MeshData.Normals, MeshData.UVs, MeshData.VertexColors, MeshData.Tangents, false);
+	ProcMesh->SetMaterial(0, Material);
 }
 
 FVector ACylinderStripActor::RotatePointAroundPivot(FVector InPoint, FVector InPivot, FVector InAngles)
@@ -160,9 +95,13 @@ void ACylinderStripActor::PreCacheCrossSection()
 	LastCachedCrossSectionCount = RadialSegmentCount;
 }
 
-void ACylinderStripActor::GenerateCylinder(TArray<FRuntimeMeshVertexSimple>& InVertices, TArray<int32>& InTriangles, FVector StartPoint, FVector EndPoint, float InWidth, int32 InCrossSectionCount, int32& InVertexIndex, int32& InTriangleIndex, bool bInSmoothNormals/* = true*/)
+void ACylinderStripActor::GenerateCylinder(FProceduralMeshData& MeshData, FVector StartPoint, FVector EndPoint, float InWidth, int32 InCrossSectionCount, int32 InVertexIndexStart, bool bInSmoothNormals/* = true*/)
 {
-	// Make a cylinder section
+	// Basic setup
+	int32 VertexIndex = InVertexIndexStart;
+	int32 NumVerts = InCrossSectionCount * 4; // 4 verts per face
+
+											  // Make a cylinder section
 	const float AngleBetweenQuads = (2.0f / (float)(InCrossSectionCount)) * PI;
 	const float UMapPerQuad = 1.0f / (float)InCrossSectionCount;
 
@@ -189,34 +128,34 @@ void ACylinderStripActor::GenerateCylinder(TArray<FRuntimeMeshVertexSimple>& InV
 		FVector p3 = p0 + Offset;
 
 		// Set up the quad triangles
-		int32 VertIndex1 = InVertexIndex++;
-		int32 VertIndex2 = InVertexIndex++;
-		int32 VertIndex3 = InVertexIndex++;
-		int32 VertIndex4 = InVertexIndex++;
+		int32 VertIndex1 = VertexIndex++;
+		int32 VertIndex2 = VertexIndex++;
+		int32 VertIndex3 = VertexIndex++;
+		int32 VertIndex4 = VertexIndex++;
 
-		InVertices[VertIndex1].Position = p0;
-		InVertices[VertIndex2].Position = p1;
-		InVertices[VertIndex3].Position = p2;
-		InVertices[VertIndex4].Position = p3;
+		MeshData.Vertices[VertIndex1] = p0;
+		MeshData.Vertices[VertIndex2] = p1;
+		MeshData.Vertices[VertIndex3] = p2;
+		MeshData.Vertices[VertIndex4] = p3;
 
 		// Now create two triangles from those four vertices
 		// The order of these (clockwise/counter-clockwise) dictates which way the normal will face. 
-		InTriangles[InTriangleIndex++] = VertIndex4;
-		InTriangles[InTriangleIndex++] = VertIndex3;
-		InTriangles[InTriangleIndex++] = VertIndex1;
+		MeshData.Triangles.Add(VertIndex4);
+		MeshData.Triangles.Add(VertIndex3);
+		MeshData.Triangles.Add(VertIndex1);
 
-		InTriangles[InTriangleIndex++] = VertIndex3;
-		InTriangles[InTriangleIndex++] = VertIndex2;
-		InTriangles[InTriangleIndex++] = VertIndex1;
+		MeshData.Triangles.Add(VertIndex3);
+		MeshData.Triangles.Add(VertIndex2);
+		MeshData.Triangles.Add(VertIndex1);
 
 		// UVs.  Note that Unreal UV origin (0,0) is top left
-		InVertices[VertIndex1].UV0 = FVector2D(1.0f - (UMapPerQuad * QuadIndex), 1.0f);
-		InVertices[VertIndex2].UV0 = FVector2D(1.0f - (UMapPerQuad * (QuadIndex + 1)), 1.0f);
-		InVertices[VertIndex3].UV0 = FVector2D(1.0f - (UMapPerQuad * (QuadIndex + 1)), 0.0f);
-		InVertices[VertIndex4].UV0 = FVector2D(1.0f - (UMapPerQuad * QuadIndex), 0.0f);
+		MeshData.UVs[VertIndex1] = FVector2D(1.0f - (UMapPerQuad * QuadIndex), 1.0f);
+		MeshData.UVs[VertIndex2] = FVector2D(1.0f - (UMapPerQuad * (QuadIndex + 1)), 1.0f);
+		MeshData.UVs[VertIndex3] = FVector2D(1.0f - (UMapPerQuad * (QuadIndex + 1)), 0.0f);
+		MeshData.UVs[VertIndex4] = FVector2D(1.0f - (UMapPerQuad * QuadIndex), 0.0f);
 
 		// Normals
-		FVector NormalCurrent = FVector::CrossProduct(InVertices[VertIndex1].Position - InVertices[VertIndex3].Position, InVertices[VertIndex2].Position - InVertices[VertIndex3].Position).GetSafeNormal();
+		FVector NormalCurrent = FVector::CrossProduct(MeshData.Vertices[VertIndex1] - MeshData.Vertices[VertIndex3], MeshData.Vertices[VertIndex2] - MeshData.Vertices[VertIndex3]).GetSafeNormal();
 
 		if (bInSmoothNormals)
 		{
@@ -241,20 +180,20 @@ void ACylinderStripActor::GenerateCylinder(TArray<FRuntimeMeshVertexSimple>& InV
 			FVector AverageNormalLeft = (NormalCurrent + NormalPrevious) / 2;
 			AverageNormalLeft = AverageNormalLeft.GetSafeNormal();
 
-			InVertices[VertIndex1].Normal = FPackedNormal(AverageNormalLeft);
-			InVertices[VertIndex2].Normal = FPackedNormal(AverageNormalRight);
-			InVertices[VertIndex3].Normal = FPackedNormal(AverageNormalRight);
-			InVertices[VertIndex4].Normal = FPackedNormal(AverageNormalLeft);
+			MeshData.Normals[VertIndex1] = AverageNormalLeft;
+			MeshData.Normals[VertIndex2] = AverageNormalRight;
+			MeshData.Normals[VertIndex3] = AverageNormalRight;
+			MeshData.Normals[VertIndex4] = AverageNormalLeft;
 		}
 		else
 		{
 			// If not smoothing we just set the vertex normal to the same normal as the polygon they belong to
-			InVertices[VertIndex1].Normal = InVertices[VertIndex2].Normal = InVertices[VertIndex3].Normal = InVertices[VertIndex4].Normal = FPackedNormal(NormalCurrent);
+			MeshData.Normals[VertIndex1] = MeshData.Normals[VertIndex2] = MeshData.Normals[VertIndex3] = MeshData.Normals[VertIndex4] = NormalCurrent;
 		}
 
 		// Tangents (perpendicular to the surface)
 		FVector SurfaceTangent = p0 - p1;
 		SurfaceTangent = SurfaceTangent.GetSafeNormal();
-		InVertices[VertIndex1].Tangent = InVertices[VertIndex2].Tangent = InVertices[VertIndex3].Tangent = InVertices[VertIndex4].Tangent = FPackedNormal(SurfaceTangent);
+		MeshData.Tangents[VertIndex1] = MeshData.Tangents[VertIndex2] = MeshData.Tangents[VertIndex3] = MeshData.Tangents[VertIndex4] = FProcMeshTangent(SurfaceTangent, true);
 	}
 }

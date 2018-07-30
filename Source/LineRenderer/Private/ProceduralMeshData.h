@@ -3,12 +3,12 @@
 
 #pragma once
 
-#include "ProceduralMeshesPrivatePCH.h"
+#include "LineRendererPrivatePCH.h"
 #include "ProceduralMeshComponent.h"
 #include "ProceduralMeshData.generated.h"
 
 USTRUCT()
-struct PROCEDURALMESHES_API FProceduralMeshData
+struct LineRenderer_API FProceduralMeshData : public UField
 {
 	GENERATED_USTRUCT_BODY()
 
